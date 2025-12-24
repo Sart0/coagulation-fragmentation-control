@@ -23,19 +23,17 @@ class AdjointFiniteVolumeSolver:
     K_fun: callable
     alpha_fun: callable
     b_fun: callable
-    running_cost_grad: callable
 
     # ---------------------------------------------------------------------
     # Construction & pre-computation
     # ---------------------------------------------------------------------
-    def __init__(self, ve: "VolumeElements", times: jnp.ndarray,
-                 K_fun, alpha_fun, b_fun, running_cost_grad):
+    def __init__(self, ve: VolumeElements, times: jnp.ndarray,
+                 K_fun, alpha_fun, b_fun):
         self.volume_elements = ve
         self.times = times
         self.K_fun = K_fun
         self.alpha_fun = alpha_fun
         self.b_fun = b_fun
-        self.running_cost_grad = running_cost_grad
 
         # Grid shortcuts
         self.x  = ve.centers
@@ -84,11 +82,6 @@ class AdjointFiniteVolumeSolver:
         frag_gain = - self.alpha_vec * (self.B_mat.T @ (phi * dy))
         return c * (term_a + term_b - term_c) + frag_loss + frag_gain
 
-    
-    @partial(jax.jit, static_argnums=0)
-    def inhomogeneous_rhs(self, f: jnp.ndarray, phi: jnp.ndarray, c: float) -> jnp.ndarray:
-        return self.rhs(f, phi, c) - self.running_cost_grad(f)
-
     # ------------------------------------------------------------------
     # Backward time marching (vectorised over *all* steps)
     # ------------------------------------------------------------------
@@ -127,7 +120,7 @@ class AdjointFVEulerSolver(AdjointFiniteVolumeSolver):
     def _euler_backstep(self, phi_next: jnp.ndarray,
                         f_t: jnp.ndarray, u_t: float) -> jnp.ndarray:
         # φ_{n} = φ_{n+1} - dt * φ̇(t_{n+1})
-        phi_dot = self.inhomogeneous_rhs(f_t, phi_next, u_t)
+        phi_dot = self.rhs(f_t, phi_next, u_t)
         return phi_next - self.dt * phi_dot
 
 
