@@ -44,6 +44,5 @@ Then open `main.ipynb` and run the cells.
 Repository:
 - https://github.com/Sart0/coagulation-fragmentation-control
 
-For paper-grade reproducibility, cite a tagged release or a specific commit hash.
 
 
