@@ -68,7 +68,10 @@ def plot_residuals(pmp_hist, proj_hist, *,
         os.makedirs(output_dir, exist_ok=True)
         fig.savefig(os.path.join(output_dir, name), dpi=300)
 
-def plot_all_residuals(delta_H, delta_control, res, *,
+def plot_all_residuals(delta_H, delta_control, res, 
+                         y_min: float,
+                         y_max: float, 
+                         *,
                          title="Residuals vs iteration",
                          tol=None,
                          mark_every=5,
@@ -81,6 +84,7 @@ def plot_all_residuals(delta_H, delta_control, res, *,
     ax.plot(k, delta_H, linewidth=1.8, marker='s', color = 'blue', markevery=mark_every, linestyle=":", label="Relative Hamiltonian error")
     ax.plot(k, res, linewidth=1.8, marker='s', color = 'green', markevery=mark_every, linestyle=":", label="Projection residual")
     ax.set_xlim(-1,K)
+    ax.set_ylim(y_min, y_max)  
     
     if tol is not None:
         ax.axhline(tol, linestyle=":", linewidth=1.0, label=f"tol = {tol:g}")

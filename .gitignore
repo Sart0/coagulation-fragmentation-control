@@ -1,20 +1,27 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
 
 # Virtual environments
 .venv/
 venv/
+env/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# OS files
+# OS / editor
 .DS_Store
 Thumbs.db
+.vscode/
 
-# Outputs (add/remove depending on your repo)
-outputs/
-results/
-runs/
-wandb/
+# Generated data / results
+test_case_paper/
+*.npy
+*.npz
+*.pickle
+*.pkl
+
+# Figures / logs if generated
+*.log

@@ -1,12 +1,8 @@
 from __future__ import annotations 
 
-import dataclasses
-from functools import partial
-from typing import Callable, Tuple
 import jax
 import jax.numpy as jnp
 from flax import struct
-import chex
 
 @struct.dataclass
 class Control:

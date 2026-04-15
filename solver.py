@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from data_classes import State, Trajectory, VolumeElements, Control
 
-import dataclasses
 from functools import partial
-from typing import Callable, Tuple
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
-import chex
 from jax.ops import segment_sum
 
 
@@ -70,6 +68,7 @@ class FiniteVolumeSolver:
         scale = jnp.where(col_mass > 0.0, self.x / col_mass, 0.0)               # (N,)
         self.B_mat = B_raw * scale[None, :]                                     # (N, N)
 
+
     # ------------------------------------------------------------------
     # Low‑level building blocks (all JIT‑compiled, differentiable)             
     # ------------------------------------------------------------------
@@ -80,16 +79,6 @@ class FiniteVolumeSolver:
         Kff = c * self.K_mat * (f[:, None] * f[None, :])  # (N,N)
         flat = 0.5 * (Kff * self.dx[None, :]).ravel()      # (N²,) 
         return segment_sum(flat, self.idx_sum, num_segments=self.N)  # (N,)
-    
-    # @partial(jax.jit, static_argnums=0)
-    # def _coag_gain(self, f: jnp.ndarray, c: float) -> jnp.ndarray:
-    #     N = self.N
-    #     Kff = c * self.K_mat * (f[:, None] * f[None, :])         # (N,N)
-    #     contrib = 0.5 * (Kff * self.dx[None, :]).ravel()         # (N^2,)
-    #     idx = self.idx_sum
-    #     valid = (idx < N)
-    #     out = jnp.zeros((N,), dtype=f.dtype)
-    #     return out.at[idx[valid]].add(contrib[valid])
 
     @partial(jax.jit, static_argnums=0)
     def _coag_loss(self, f: jnp.ndarray, c: float) -> jnp.ndarray:
@@ -117,27 +106,6 @@ class FiniteVolumeSolver:
             + self._frag_gain(f)
             - self._frag_loss(f)
         )
-
-    # # ------------------------------------------------------------------
-    # # Top‑level time marching (vectorised over *all* time steps)         
-    # # ------------------------------------------------------------------
-    # @partial(jax.jit, static_argnums=0)
-    # def solve(self, *, initial_state: State, control: Control) -> tuple[State, Trajectory]:
-    #     """Return final :class:`State` and full trajectory ``(T,N)``."""
-    #     if self.integrator is None:
-    #         raise RuntimeError("Integrator not set. Use FVEulerSolver or FVAdjointRK4Solver.")
-        
-    #     m_0 = initial_state.first_moment()
-    #     def step(state: State, u_t):
-    #         next_state = self.integrator(state, u_t)
-    #         next_m = next_state.first_moment()
-    #         return next_state, (next_state.f, next_m) # carry, output
-
-    #     final_state, (f_seq, m_seq) = jax.lax.scan(step, initial_state, control.values[:-1])
-    #     f_seq = jnp.concatenate([initial_state.f[None, :], f_seq], axis=0)  # add initial state
-    #     m_seq = jnp.concatenate([m_0[None], m_seq], axis=0)
-    #     trajectory = Trajectory(f=f_seq, centers=self.x, times=self.times)
-    #     return final_state, trajectory, m_seq
     
     @partial(jax.jit, static_argnums=0)
     def solve(self, *, initial_state: State, control: Control) -> tuple[State, Trajectory, jax.Array]:
@@ -148,32 +116,7 @@ class FiniteVolumeSolver:
 
         x   = self.x
         dx  = self.dx
-        g   = x * dx                        # constraint direction (∂/∂f of the first moment)
-        winv = getattr(self, "proj_winv", jnp.ones_like(x))  # for "projection" mode
 
-
-        m_target = initial_state.first_moment()  # invariant mass
-
-        def renormalize(f: jax.Array, m_curr: jax.Array) -> jax.Array:
-            # Exact mass after return: sum_i x_i f_i dx_i = m_target
-            eps = 1e-30
-
-            if self.mass_fix == "scale":
-                s = m_target / (m_curr + eps)         # uniform scaling, positivity preserved
-                return s * f
-
-            elif self.mass_fix == "projection":
-                # Least-change correction in weighted L2: min ||f - \tilde f||_W s.t. <g,f>=m_target
-                # W^{-1} is diag(winv); direction = W^{-1} g
-                denom = (g * winv * g).sum() + eps
-                lam   = (m_curr - m_target) / denom
-                f_new = f - lam * winv * g
-                # Typically no need to clamp: the correction is tiny.
-                return f_new
-
-            else:
-                # No fix
-                return f
 
         def step(state: State, u_t):
             # 1) tentative step
@@ -181,22 +124,19 @@ class FiniteVolumeSolver:
 
             # 2) per-step mass enforcement (exact)
             m_curr = nxt.first_moment()
-            f_fix  = renormalize(nxt.f, m_curr)
-            nxt    = State(f_fix, x)
+            f_nxt  = nxt.f
+            nxt    = State(f_nxt, x)
 
-            # 3) record mass after fix
-            m_next = nxt.first_moment()
-            return nxt, (f_fix, m_next)
+            return nxt, f_nxt
 
         # scan over controls (adjust indexing if your integrator expects length T or T-1)
-        final_state, (f_seq, m_seq) = jax.lax.scan(step, initial_state, control.values[:-1])
+        final_state, f_seq = jax.lax.scan(step, initial_state, control.values[:-1])
 
         # prepend initial state to trajectory
         f_seq = jnp.concatenate([initial_state.f[None, :], f_seq], axis=0)
-        m_seq = jnp.concatenate([m_target[None], m_seq], axis=0)
 
         trajectory = Trajectory(f=f_seq, centers=x, times=self.times)
-        return final_state, trajectory, m_seq
+        return final_state, trajectory
 
 # ------------------------------------------------------------------------------
 # 3.  Concrete forward integrators                                              

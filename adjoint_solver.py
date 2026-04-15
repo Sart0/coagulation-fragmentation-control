@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from data_classes import State, Trajectory, VolumeElements, Control
+from data_classes import Trajectory, VolumeElements, Control
 
-import dataclasses
 from functools import partial
-from typing import Callable, Tuple
 
 import jax
 import jax.numpy as jnp
-import chex
 
 from functools import partial
 import jax
@@ -68,18 +65,39 @@ class AdjointFiniteVolumeSolver:
     # ------------------------------------------------------------------
     # Adjoint RHS (used by integrators)
     # ------------------------------------------------------------------
+    # @partial(jax.jit, static_argnums=0)
+    # def rhs(self, f: jnp.ndarray, phi: jnp.ndarray, c: float) -> jnp.ndarray:
+    #     dy = self.dx
+    #     term_a = self.K_mat.T @ (f * phi * dy)
+    #     term_b = phi * (self.K_mat @ (f * dy))
+    #     X = self.x[:, None]; Y = self.x[None, :]
+    #     x_plus_y = X + Y
+    #     phi_xy   = jnp.interp(x_plus_y, self.x, phi, left=0.0, right=0.0)
+    #     K_sum    = self.K_fun(x_plus_y, Y)            # assume pure JAX function
+    #     term_c   = jnp.sum(K_sum * (f[None, :] * phi_xy * dy[None, :]), axis=1)
+    #     frag_loss = self.alpha_vec * phi
+    #     frag_gain = - self.alpha_vec * (self.B_mat.T @ (phi * dy))
+    #     return c * (term_a + term_b - term_c) + frag_loss + frag_gain
+
     @partial(jax.jit, static_argnums=0)
     def rhs(self, f: jnp.ndarray, phi: jnp.ndarray, c: float) -> jnp.ndarray:
         dy = self.dx
+
+        # \int K(y,x) f(y) phi(y) dy
         term_a = self.K_mat.T @ (f * phi * dy)
+
+        # phi(x) \int K(x,y) f(y) dy
         term_b = phi * (self.K_mat @ (f * dy))
-        X = self.x[:, None]; Y = self.x[None, :]
-        x_plus_y = X + Y
-        phi_xy   = jnp.interp(x_plus_y, self.x, phi, left=0.0, right=0.0)
-        K_sum    = self.K_fun(x_plus_y, Y)            # assume pure JAX function
-        term_c   = jnp.sum(K_sum * (f[None, :] * phi_xy * dy[None, :]), axis=1)
+
+        # \int K(y,x) f(y) phi(x+y) dy
+        X = self.x[:, None]
+        Y = self.x[None, :]
+        phi_xy = jnp.interp(X + Y, self.x, phi, left=0.0, right=0.0)
+        term_c = jnp.sum(self.K_mat.T * (f[None, :] * phi_xy * dy[None, :]), axis=1)
+
         frag_loss = self.alpha_vec * phi
         frag_gain = - self.alpha_vec * (self.B_mat.T @ (phi * dy))
+
         return c * (term_a + term_b - term_c) + frag_loss + frag_gain
 
     # ------------------------------------------------------------------

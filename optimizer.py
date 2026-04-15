@@ -5,7 +5,7 @@ import jax
 from jax import lax
 import jax.numpy as jnp
 
-from data_classes import State, Control, VolumeElements, Trajectory
+from data_classes import State, Control, Trajectory
 from solver import FiniteVolumeSolver
 from adjoint_solver import AdjointFiniteVolumeSolver
 
@@ -71,7 +71,7 @@ class Optimizer:
     @partial(jax.jit, static_argnums=0)
     def _loss(self, u_vec: jnp.ndarray) -> float:
         control = Control(jnp.clip(u_vec, self.u_min, self.u_max), self.t)
-        state_T, traj, _ = self.solver.solve(initial_state=self.state0, control=control)
+        state_T, traj = self.solver.solve(initial_state=self.state0, control=control)
         return self.total_cost(traj, control)
 
     # ------------------------------------------------------------------
@@ -152,7 +152,7 @@ class Optimizer:
     def _loss_and_grad_adj(self, u_vec: jnp.ndarray) -> Tuple[float, jnp.ndarray]:
         """Return the loss and its gradient w.r.t. *u* using a discrete adjoint."""
         control = Control(jnp.clip(u_vec, self.u_min, self.u_max), self.t)
-        state_T, f_traj, _ = self.solver.solve(initial_state=self.state0, control=control)
+        state_T, f_traj = self.solver.solve(initial_state=self.state0, control=control)
         # Integrate the adjoint backwards in time
         phi_T = self.terminal_cost_grad(state_T)
         phi_traj = self.adj_solver.integrate(f_traj, control, phi_T)
@@ -163,6 +163,16 @@ class Optimizer:
         loss_val = self.total_cost(f_traj, control)
         terminal_ = self.terminal_cost(state_T)
         return loss_val, terminal_, grad_u, f_traj, phi_traj
+
+    # ------------------------------------------------------------------
+    # Adjoint helpers
+    # ------------------------------------------------------------------
+
+    @partial(jax.jit, static_argnums=0)
+    def grad_autodiff(self, u_vec: jnp.ndarray) -> Tuple[float, jnp.ndarray]:
+        """Return the loss and its gradient w.r.t. *u* using a discrete adjoint."""
+        loss, grad_u = jax.value_and_grad(self._loss)(u_vec)
+        return loss, grad_u
     
     # ---------------------------------------------------------------------------------
     # Projected gradient descent
